@@ -1,0 +1,65 @@
+uart:
+  tx_pin: GPIO1
+  rx_pin: GPIO3
+  baud_rate: 9600
+  stop_bits: 1
+  id: uart_bus
+
+# Manual trigger button
+button:
+  - platform: template
+    name: "Measure Now"
+    id: measure_now
+    on_press:
+      - uart.write: 
+          id: uart_bus
+          data: "MEASURE\n"
+
+# Parse UART data to text
+text_sensor:
+  - platform: template
+    id: uart_received
+    name: "UART Received Data Raw"
+    update_interval: 100ms
+    lambda: |-
+      static std::string buffer;
+      while (id(uart_bus).available()) {
+        uint8_t byte;
+        if (id(uart_bus).read_byte(&byte)) {
+          if (byte == '\n' || byte == '\r') {
+            if (!buffer.empty()) {
+              std::string received = buffer;
+              buffer.clear();
+              
+              // Try to parse string to float
+              float height = atof(received.c_str());
+              
+              // Only if parsing succeeds (basic check)
+              if (height > 0 && height < 10) { // Assume cistern <10m deep
+                id(cistern_height).publish_state(height);
+              }
+              
+              return received;
+            }
+          } else {
+            buffer += static_cast<char>(byte);
+          }
+        }
+      }
+      return {};
+
+sensor:
+  - platform: template
+    name: "Cistern Height"
+    id: cistern_height
+    unit_of_measurement: "m"
+    accuracy_decimals: 2
+    update_interval: never  # Update manually
+
+# Automatic trigger every X seconds
+interval:
+  - interval: 60s   # Change to what you want, like 5min = 300s
+    then:
+      - uart.write: 
+          id: uart_bus
+          data: "MEASURE\n"
